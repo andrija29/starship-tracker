@@ -4,6 +4,7 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import * as O from './orbit.js';
+import { analyze, compass } from './observer.js';
 
 const $ = (id) => document.getElementById(id);
 const KM = 1 / 6378.137; // scene units per km (Earth radius = 1)
@@ -203,7 +204,7 @@ base.scale.setScalar(0.024);
 earth.add(base);
 
 // ---------- state ----------
-let simT = W0, playing = !matchMedia('(prefers-reduced-motion: reduce)').matches, speed = 600, view = 'follow';
+let simT = W0, playing = true, speed = 1, view = 'follow', sync = live;
 let lastFrame = performance.now(), followBlend = 1;
 const st = new Float64Array(6);
 const shipPos = new THREE.Vector3(), tmpV = new THREE.Vector3(), sunV = new THREE.Vector3();
@@ -287,32 +288,196 @@ function setPlaying(p) {
 }
 el.play.addEventListener('click', () => {
   if (!playing && simT >= W1 - 1) simT = W0;
+  if (playing) sync = false;
   setPlaying(!playing);
 });
-el.scrub.addEventListener('input', () => { simT = W0 + Number(el.scrub.value); });
+el.scrub.addEventListener('input', () => { simT = W0 + Number(el.scrub.value); sync = false; });
 for (const b of document.querySelectorAll('[data-speed]')) {
   b.addEventListener('click', () => {
     speed = Number(b.dataset.speed);
     document.querySelectorAll('[data-speed]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    if (speed === 1 && Date.now() / 1000 > W0) simT = Math.min(Date.now() / 1000, W1);
+    sync = speed === 1 && Date.now() / 1000 > W0 && Date.now() / 1000 < W1;
     setPlaying(true);
   });
 }
 for (const b of document.querySelectorAll('[data-view]')) {
   b.addEventListener('click', () => {
-    view = b.dataset.view;
-    document.querySelectorAll('[data-view]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    controls.enableRotate = view !== 'follow';
-    if (view === 'follow') followBlend = 0;
+    setView(b.dataset.view);
   });
 }
-controls.enableRotate = false;
+function setView(v) {
+  // the Earth-fixed view counter-rotates the scene, so turn the camera with it to avoid a jump
+  const th = O.gmst(simT), Y = new THREE.Vector3(0, 1, 0);
+  if (v === 'fixed' && view !== 'fixed') camera.position.applyAxisAngle(Y, -th);
+  if (v !== 'fixed' && view === 'fixed') camera.position.applyAxisAngle(Y, th);
+  view = v;
+  document.querySelectorAll('[data-view]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.view === v)));
+  if (view === 'follow') followBlend = 0;
+}
 $('showOrbit').addEventListener('change', (e) => { orbitLine.visible = e.target.checked; });
 $('showSun').addEventListener('change', (e) => {
   sunLine.visible = sunDot.visible = e.target.checked;
   el.sunLabel.style.display = e.target.checked ? '' : 'none';
 });
 $('showTrack').addEventListener('change', (e) => { trackAhead.visible = trackDone.visible = e.target.checked; });
+
+// ---------- "I'm here": observer location, closest approach, visibility ----------
+const you = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: dotTexture('#ffffff', 'rgba(120,255,170,0.55)'), sizeAttenuation: false, depthWrite: false, transparent: true,
+}));
+you.scale.setScalar(0.03);
+you.visible = false;
+earth.add(you);
+const ui = {};
+for (const id of ['here', 'pickBanner', 'pickCancel', 'obs', 'youLabel']) ui[id] = $(id);
+let picking = false, viewBeforePick = 'follow', observer = null, youTick = null;
+const localDT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+
+function setPicking(on) {
+  picking = on;
+  ui.pickBanner.hidden = !on;
+  canvas.style.cursor = on ? 'crosshair' : '';
+  ui.here.hidden = on;
+  if (on) { viewBeforePick = view; setView('fixed'); } else setView(viewBeforePick);
+}
+ui.here.addEventListener('click', () => setPicking(!picking));
+ui.pickCancel.addEventListener('click', () => setPicking(false));
+
+let downAt = null;
+canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+// dragging the globe while following the ship hands control to the user in the Earth-fixed view
+// (listening on window in the capture phase so nothing can swallow the move events)
+window.addEventListener('pointermove', (e) => {
+  if (view === 'follow' && downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) setView('fixed');
+}, true);
+const endDrag = () => { setTimeout(() => { downAt = null; }, 0); };
+window.addEventListener('pointerup', endDrag, true);
+window.addEventListener('pointercancel', endDrag, true);
+canvas.addEventListener('pointerup', (e) => {
+  if (!picking || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+  const r = canvas.getBoundingClientRect();
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const hit = ray.intersectObject(earth, false)[0];
+  if (!hit) return;
+  const p = earth.worldToLocal(hit.point.clone()).normalize();
+  // the globe is drawn as a sphere, so p.y gives geocentric latitude; convert to geodetic
+  const lat = Math.atan(Math.tan(Math.asin(p.y)) / (1 - 0.00669438)) * 180 / Math.PI;
+  const lon = Math.atan2(-p.z, p.x) * 180 / Math.PI;
+  setPicking(false);
+  setObserver(lat, lon, true);
+});
+
+function whyNot(p) {
+  if (p.why === 'low') return `it climbs only ${Math.max(0, p.max.el).toFixed(0)}° above your horizon`;
+  if (p.why === 'day') return 'it passes in daylight';
+  if (p.why === 'twilight') return 'your sky is still too bright (twilight)';
+  return 'the ship is in Earth’s shadow, so it reflects no sunlight';
+}
+
+function setObserver(lat, lon, save) {
+  observer = analyze(eph, lat, lon, W0, O.LAND);
+  const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
+  you.position.set(Math.cos(la) * Math.cos(lo), Math.sin(la), -Math.cos(la) * Math.sin(lo)).multiplyScalar(1.006);
+  you.visible = true;
+  ui.youLabel.style.display = '';
+  if (save) { try { localStorage.setItem('observer', JSON.stringify([lat, lon])); } catch (e) { /* storage unavailable */ } }
+
+  const c = observer.closest, b = observer.best, hi = observer.highest;
+  const skyWord = { day: 'Daytime', twilight: 'Twilight', night: 'Night' }[c.sky];
+  let verdict, cls, detail;
+  if (b) {
+    cls = 'yes';
+    verdict = observer.visibleCount > 1 ? `Visible on ${observer.visibleCount} passes` : 'Visible';
+    const weak = b.visMax.el < 20 || b.visSec < 60;
+    detail = `Best pass ${fmtUTC(b.visStart.t)} to ${fmtUTC(b.visEnd.t + 10)} UTC (${localDT.format(b.visMax.t * 1000)} on your clock). ` +
+      `Look ${compass(b.visMax.az)}, about ${b.visMax.el.toFixed(0)}° above the horizon` +
+      (compass(b.visStart.az) !== compass(b.visEnd.az) ? `; it moves from ${compass(b.visStart.az)} to ${compass(b.visEnd.az)}. ` : '. ') +
+      (weak ? 'It is low and brief, so you need a clear horizon.' : 'It should look like a bright star moving steadily across the sky.');
+  } else if (!hi) {
+    cls = 'no';
+    verdict = 'Not visible';
+    detail = `The ship never rises above your horizon. Its orbit stays between ${sum.inc.toFixed(1)}° north and south.`;
+  } else {
+    cls = 'no';
+    verdict = 'Not visible';
+    detail = `${observer.passes.length} pass${observer.passes.length > 1 ? 'es' : ''} above your horizon before landing, none you can see. ` +
+      `On the highest one (${fmtUTC(hi.max.t).slice(0, 5)} UTC) ${whyNot(hi)}.`;
+  }
+  const cWhy = c.el < 10 ? 'it is too low in your sky' : c.sunEl > -6 ? 'your sky is too bright' : 'the ship is in Earth’s shadow';
+  const cNote = b && !c.visible ? ` At that moment ${cWhy}, so watch the top-ranked pass instead.` : '';
+  const cWhere = c.el < 0 ? `${Math.abs(c.el).toFixed(0)}° below your horizon` : `${c.el.toFixed(0)}° above your horizon toward ${compass(c.az)}`;
+  const clock = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const sight = (p) => (p.visible ? `Visible, ${p.visSec >= 60 ? `${Math.round(p.visSec / 60)} min` : `${p.visSec} s`}`
+    : { low: 'Too low', day: 'Daylight', twilight: 'Sky too bright', shadow: 'Ship in shadow' }[p.why]);
+  const skyName = { day: 'Day', twilight: 'Twilight', night: 'Night' };
+  const rows = observer.ranked.map((p, i) => {
+    const isClosest = c.t >= p.start.t - 10 && c.t <= p.end.t + 10;
+    const t = p.visible ? p.visMax.t : isClosest ? c.t : p.near.t;
+    return `<tr data-t="${t}" tabindex="0" class="${p.visible ? 'vis' : ''}"><td>${i + 1}</td>` +
+      `<td>${fmtUTC(t).slice(0, 5)}</td><td>${clock.format(t * 1000)}</td>` +
+      `<td>${Math.round(p.near.range / 1000).toLocaleString('en-GB')} km${isClosest ? ' <em>closest</em>' : ''}</td>` +
+      `<td>${Math.max(0, p.max.el).toFixed(0)}° ${compass(p.max.az)}</td>` +
+      `<td><span class="sky ${p.sky}"></span>${skyName[p.sky]}</td><td>${sight(p)}</td></tr>`;
+  }).join('');
+  ui.obs.hidden = false;
+  ui.obs.innerHTML =
+    `<div class="obshead"><span>You: ${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? 'E' : 'W'}</span>` +
+    '<button type="button" id="obsClear" aria-label="Remove my location">Remove</button></div>' +
+    `<div class="verdict ${cls}"><i></i>${verdict}</div>` +
+    `<p>${detail}</p>` +
+    `<p class="soft">Closest approach: ${fmtUTC(c.t)} UTC (${localDT.format(c.t * 1000)} on your clock), ` +
+    `${Math.round(c.range / 1000).toLocaleString('en-GB')} km away, ${cWhere}. Your sky then: ${skyWord.toLowerCase()}.${cNote}</p>` +
+    (rows ? '<div class="tablewrap"><table><caption>Passes over your horizon, best sighting first</caption>' +
+      '<thead><tr><th>#</th><th>UTC</th><th>Your clock</th><th>Nearest</th><th>Highest</th><th>Your sky</th><th>Sighting</th></tr></thead>' +
+      `<tbody>${rows}</tbody></table></div>` : '') +
+    '<div class="obsbtns"><button type="button" id="obsGo">Show closest approach</button>' +
+    '<button type="button" id="obsLive">Back to live</button></div>';
+  const jump = (t) => {
+    simT = t; sync = false; setPlaying(false); setView('fixed');
+    // in the Earth-fixed view the scene axes are the Earth's, so this puts the camera above the observer
+    const dist = Math.max(camera.position.length(), 2.6);
+    camera.position.copy(you.position).normalize().multiplyScalar(dist);
+    ui.obs.querySelectorAll('tr[data-t]').forEach((r) => r.classList.toggle('sel', Math.abs(Number(r.dataset.t) - t) < 1));
+  };
+  $('obsGo').addEventListener('click', () => jump(c.t));
+  $('obsLive').addEventListener('click', () => {
+    speed = 1; sync = live; if (!live) simT = W0;
+    document.querySelectorAll('[data-speed]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.speed === '1')));
+    setPlaying(true); setView('follow');
+    ui.obs.querySelectorAll('tr.sel').forEach((r) => r.classList.remove('sel'));
+  });
+  ui.obs.querySelectorAll('tr[data-t]').forEach((r) => {
+    const go = () => jump(Number(r.dataset.t));
+    r.addEventListener('click', go);
+    r.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  });
+  $('obsClear').addEventListener('click', clearObserver);
+  ui.here.querySelector('b').textContent = 'Change my location';
+  if (save) jump(c.t); // a fresh pick goes straight to the closest approach
+
+  if (youTick) youTick.remove();
+  youTick = document.createElement('span');
+  youTick.className = 'tick you';
+  youTick.style.left = `${((c.t - W0) / (W1 - W0)) * 100}%`;
+  youTick.innerHTML = `<i></i><b>Closest to you<br>${fmtUTC(c.t).slice(0, 5)} UTC</b>`;
+  if ((c.t - W0) / (W1 - W0) > 0.8) youTick.classList.add('right');
+  el.ticks.appendChild(youTick);
+}
+function clearObserver() {
+  observer = null;
+  you.visible = false;
+  ui.youLabel.style.display = 'none';
+  ui.obs.hidden = true;
+  if (youTick) { youTick.remove(); youTick = null; }
+  ui.here.querySelector('b').textContent = 'Find best sighting opportunities';
+  try { localStorage.removeItem('observer'); } catch (e) { /* storage unavailable */ }
+}
+ui.youLabel.style.display = 'none';
+try {
+  const saved = JSON.parse(localStorage.getItem('observer') || 'null');
+  if (Array.isArray(saved) && saved.length === 2 && saved.every(Number.isFinite)) setObserver(saved[0], saved[1], false);
+} catch (e) { /* storage unavailable */ }
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -343,7 +508,8 @@ function frame(now) {
   const dt = Math.max(0, Math.min((now - lastFrame) / 1000, 0.1));
   lastFrame = now;
   if (playing) {
-    simT += dt * speed;
+    if (sync && speed === 1) simT = Math.min(Math.max(Date.now() / 1000, W0), W1);
+    else simT += dt * speed;
     if (simT >= W1) { simT = W1; setPlaying(false); }
   }
 
@@ -385,6 +551,7 @@ function frame(now) {
 
   place(el.shipLabel, shipWorld, true);
   place(el.sunLabel, sunDot.position.clone().applyQuaternion(root.quaternion), true);
+  if (you.visible) place(ui.youLabel, you.getWorldPosition(new THREE.Vector3()), true);
   place(el.baseLabel, base.getWorldPosition(new THREE.Vector3()), true);
 
   if (now - hudClock > 90) {
@@ -417,4 +584,5 @@ function frame(now) {
 }
 setPlaying(playing);
 requestAnimationFrame(frame);
-window.__viz = { get simT() { return simT; }, set simT(x) { simT = x; }, W0, W1, live };
+window.__setObserver = setObserver;
+window.__viz = { get observer() { return observer; }, get simT() { return simT; }, set simT(x) { simT = x; }, W0, W1, live };

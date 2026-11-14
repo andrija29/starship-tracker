@@ -4,6 +4,7 @@ three.js globe showing Ship 42 from the telemetry fix (14 Nov 2026, 00:37 UTC)
 to the planned tower catch at 21:20:10 UTC (T+22:32:34).
 
 - `src/orbit.js` – fitted state vector, J2 propagator, deorbit/entry model, Sun direction
+- `src/observer.js` – closest approach, passes and naked-eye visibility for a place on the ground
 - `src/main.js` – scene, camera modes, HUD and timeline
 - `dist/` – ready-to-serve page (`index.html`, bundled `app.js`, Earth textures)
 

@@ -15,6 +15,7 @@
   --muted: #93a0b8;
   --ship: #ffc76b;   /* ship, ground track, primary actions */
   --sky: #7fb4ff;    /* inertial orbit, secondary */
+  --you: #86f0ac;    /* the viewer's own location */
   --font-ui: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --font-num: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
 }
@@ -23,11 +24,12 @@ html, body { height: 100%; margin: 0; }
 body { background: var(--space); color: var(--text); font: 14px/1.4 var(--font-ui); overflow: hidden; }
 #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .hud { position: fixed; inset: 0; pointer-events: none; display: grid; padding: 16px; gap: 12px;
-  grid-template: "head tele" auto ". ." 1fr "bar bar" auto / 1fr auto; }
+  grid-template: "head tele" auto ". ." 1fr "bar bar" auto / minmax(0, 1fr) auto; }
 .hud > * { pointer-events: auto; }
 .panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
-header { grid-area: head; max-width: 420px; pointer-events: none; }
+header { grid-area: head; max-width: 560px; min-width: 0; pointer-events: none; }
+header > h1, header > p, #summary { max-width: 420px; }
 h1 { font-size: 22px; line-height: 1.15; margin: 0 0 4px; font-weight: 650; letter-spacing: 0.01em; text-wrap: balance; }
 header p { margin: 0; color: var(--muted); }
 #summary { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 12px 0 0; }
@@ -90,19 +92,67 @@ input[type="checkbox"] { accent-color: var(--ship); margin: 0; }
 #shipLabel { color: var(--ship); font-weight: 650; }
 #baseLabel { color: #8fe3ff; }
 #sunLabel { color: #fff3c4; }
+#youLabel { color: var(--you); font-weight: 650; }
+#here { pointer-events: auto; position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 5; display: flex; flex-direction: column;
+  align-items: center; gap: 2px; padding: 12px 30px 11px; border-radius: 14px; background: var(--you); color: #06210f;
+  box-shadow: 0 6px 28px rgba(134, 240, 172, 0.35); }
+#here:hover { background: #a6f7c2; }
+#here[hidden] { display: none; }
+#here { white-space: nowrap; }
+#here b { font-size: 21px; line-height: 1.1; font-weight: 700; letter-spacing: 0.01em; }
+#here span { font-size: 12px; opacity: 0.8; }
+#pickBanner { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 5; padding: 8px 8px 8px 14px;
+  display: flex; gap: 12px; align-items: center; border-color: var(--you); max-width: calc(100% - 32px); }
+#pickBanner[hidden], #obs[hidden] { display: none; }
+#pickBanner button { border: 1px solid var(--edge); border-radius: 6px; }
+#obs { pointer-events: auto; margin-top: 14px; padding: 12px 14px; width: min(560px, 100%); max-height: calc(100vh - 380px); min-height: 150px; overflow-y: auto; }
+#obs p { margin: 6px 0 0; color: var(--text); }
+#obs .soft, #obs p.soft { color: var(--muted); font: 12px var(--font-ui); }
+.obshead { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+.obshead button { padding: 2px 8px; border: 1px solid var(--edge); border-radius: 6px; font-size: 12px; }
+.verdict { display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 650; margin-top: 8px; }
+.verdict i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.verdict.yes { color: var(--you); } .verdict.yes i { background: var(--you); box-shadow: 0 0 8px var(--you); }
+.verdict.no i { border: 2px solid var(--muted); }
+.tablewrap { overflow-x: auto; margin-top: 12px; }
+#obs table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#obs caption { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; padding-bottom: 4px; }
+#obs th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--edge); }
+#obs td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--edge); }
+#obs tbody tr { cursor: pointer; }
+#obs tbody tr:hover, #obs tbody tr:focus-visible { background: rgba(255, 255, 255, 0.06); outline: none; }
+#obs tbody tr.sel { background: rgba(134, 240, 172, 0.12); }
+#obs tr.vis td:last-child { color: var(--you); font-weight: 650; }
+#obs td em { font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ship);
+  border: 1px solid var(--ship); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.sky { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.sky.night { background: #33405c; border: 1px solid var(--muted); }
+.sky.twilight { background: #8a6fb0; }
+.sky.day { background: var(--ship); }
+.obsbtns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.obsbtns button { border: 1px solid var(--edge); border-radius: 7px; }
+.tick.you i { background: var(--you); }
 #nogl { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; background: var(--space); }
 #nogl[hidden] { display: none; }
 
+@media (max-width: 1250px) {
+  #here { position: static; transform: none; margin: 10px 0 6px; padding: 10px 20px 9px; align-items: flex-start; }
+  #here b { font-size: 17px; }
+}
 @media (max-width: 760px) {
-  .hud { grid-template: "head" auto "." 1fr "tele" auto "bar" auto / 1fr; padding: 12px; gap: 8px; }
+  .hud { grid-template: "head" auto "." 1fr "tele" auto "bar" auto / minmax(0, 1fr); padding: 12px; gap: 8px; }
   h1 { font-size: 18px; }
-  header p, #summary { display: none; }
+  header > p, #summary { display: none; }
   .tele { width: auto; padding: 10px 12px; }
   .clock { font-size: 22px; }
   .tele dl { grid-template-columns: auto 1fr auto 1fr; margin-top: 8px; }
   .state { margin-top: 8px; padding-top: 8px; }
   .checks { margin-left: 0; }
   .foot { display: none; }
+  #obs { margin-top: 8px; padding: 10px 12px; max-height: 30vh; min-height: 0; }
+  #pickBanner { top: 44px; width: calc(100% - 24px); }
+  #here span { display: none; }
   button { padding: 7px 9px; }
   .tick b { display: none; }
 }
@@ -113,13 +163,17 @@ input[type="checkbox"] { accent-color: var(--ship); margin: 0; }
 <div id="shipLabel" class="tag"><span>Ship 42</span></div>
 <div id="baseLabel" class="tag"><span>Starbase</span></div>
 <div id="sunLabel" class="tag"><span>Sun overhead</span></div>
+<div id="youLabel" class="tag"><span>You</span></div>
+<div id="pickBanner" class="panel" hidden><span>Click your location on the globe. Drag to turn it, scroll to zoom.</span><button type="button" id="pickCancel">Cancel</button></div>
 
 <div class="hud">
   <header>
     <h1>Starship Flight 15 in orbit</h1>
+    <button id="here" type="button"><b>Find best sighting opportunities</b><span>Click your location to see when Starship passes over you</span></button>
     <p id="windowLabel">From now to the planned tower catch</p>
     <dl id="summary"></dl>
     <p id="note" hidden></p>
+    <section id="obs" class="panel" aria-label="Visibility from your location" aria-live="polite" hidden></section>
   </header>
 
   <section class="tele panel" aria-label="Ship position at the displayed time">
@@ -151,16 +205,15 @@ input[type="checkbox"] { accent-color: var(--ship); margin: 0; }
       <button id="play" type="button" aria-pressed="true">Pause</button>
       <span class="lbl">Speed</span>
       <div class="group" role="group" aria-label="Playback speed">
-        <button type="button" data-speed="1" aria-pressed="false">Real time</button>
+        <button type="button" data-speed="1" aria-pressed="true">Real time</button>
         <button type="button" data-speed="60" aria-pressed="false">60×</button>
-        <button type="button" data-speed="600" aria-pressed="true">600×</button>
+        <button type="button" data-speed="600" aria-pressed="false">600×</button>
         <button type="button" data-speed="3000" aria-pressed="false">3000×</button>
       </div>
       <span class="lbl">Camera</span>
       <div class="group" role="group" aria-label="Camera">
         <button type="button" data-view="follow" aria-pressed="true">Follow ship</button>
         <button type="button" data-view="fixed" aria-pressed="false">Earth fixed</button>
-        <button type="button" data-view="inertial" aria-pressed="false">Space fixed</button>
       </div>
       <div class="checks">
         <label><input type="checkbox" id="showTrack" checked><span class="sw" style="background:var(--ship)"></span>Ground track</label>
@@ -174,6 +227,6 @@ input[type="checkbox"] { accent-color: var(--ship); margin: 0; }
 </div>
 
 <div id="nogl" hidden><p>This view needs WebGL, which this browser has turned off. Open the page in a browser with hardware acceleration enabled.</p></div>
-<script src="app.js"></script>
+<script src="app.js?v=1794619699"></script>
 </body>
 </html>
