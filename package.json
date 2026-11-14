@@ -1,0 +1,19 @@
+{
+  "name": "starship-flight15-orbit",
+  "version": "1.0.0",
+  "description": "three.js visualizer of Starship Flight 15's orbit through planned landing",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --outfile=dist/app.js",
+    "serve": "npx http-server dist -p 8080"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "three": "^0.187.0",
+    "three-globe": "^2.45.6"
+  },
+  "private": true,
+  "type": "module"
+}

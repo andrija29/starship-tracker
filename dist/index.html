@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starship Flight 15 Orbit</title>
+<style>
+:root {
+  /* Layout: full-bleed globe, readouts floating top-left and top-right, one timeline bar along the bottom. */
+  color-scheme: dark;
+  --space: #05070d;
+  --panel: rgba(12, 17, 28, 0.78);
+  --edge: rgba(150, 175, 215, 0.18);
+  --text: #e8edf6;
+  --muted: #93a0b8;
+  --ship: #ffc76b;   /* ship, ground track, primary actions */
+  --sky: #7fb4ff;    /* inertial orbit, secondary */
+  --font-ui: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-num: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--space); color: var(--text); font: 14px/1.4 var(--font-ui); overflow: hidden; }
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.hud { position: fixed; inset: 0; pointer-events: none; display: grid; padding: 16px; gap: 12px;
+  grid-template: "head tele" auto ". ." 1fr "bar bar" auto / 1fr auto; }
+.hud > * { pointer-events: auto; }
+.panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+header { grid-area: head; max-width: 420px; pointer-events: none; }
+h1 { font-size: 22px; line-height: 1.15; margin: 0 0 4px; font-weight: 650; letter-spacing: 0.01em; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); }
+#summary { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 12px 0 0; }
+#summary div { display: flex; flex-direction: column; }
+dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+dd { margin: 0; font: 15px var(--font-num); font-variant-numeric: tabular-nums; }
+#note { margin-top: 10px; color: var(--ship); max-width: 44ch; }
+
+.tele { grid-area: tele; padding: 14px 16px; width: 252px; align-self: start; }
+.clock { font: 30px/1 var(--font-num); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.clock small { font-size: 13px; color: var(--muted); margin-left: 6px; }
+.sub { color: var(--muted); font-size: 12px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.tele dl { margin: 12px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; align-items: baseline; }
+.tele dd { text-align: right; font-size: 14px; }
+.state { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--edge); }
+#lightDot { width: 10px; height: 10px; border-radius: 50%; background: var(--ship); box-shadow: 0 0 8px var(--ship); flex: none; }
+#lightDot[data-state="dark"] { background: #33405c; box-shadow: none; border: 1px solid var(--muted); }
+#over { margin-left: auto; color: var(--muted); }
+
+.bar { grid-area: bar; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.group { display: flex; gap: 0; border: 1px solid var(--edge); border-radius: 7px; overflow: hidden; }
+button { font: 13px var(--font-ui); color: var(--text); background: transparent; border: 0; padding: 7px 11px; cursor: pointer; }
+.group button + button { border-left: 1px solid var(--edge); }
+button:hover { background: rgba(255, 255, 255, 0.07); }
+button[aria-pressed="true"] { background: rgba(255, 199, 107, 0.18); color: var(--ship); }
+#play { background: var(--ship); color: #1a1204; font-weight: 650; border-radius: 7px; min-width: 68px; }
+#play:hover { background: #ffd58f; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.lbl { color: var(--muted); font-size: 12px; }
+.checks { display: flex; gap: 14px; margin-left: auto; flex-wrap: wrap; }
+.checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+input[type="checkbox"] { accent-color: var(--ship); margin: 0; }
+.timeline { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+  font: 12px var(--font-num); color: var(--muted); font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 22px; display: flex; align-items: center; }
+#scrub { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; margin: 0; border-radius: 2px; cursor: pointer;
+  background: linear-gradient(to right, var(--ship) var(--p, 0%), rgba(150, 175, 215, 0.28) var(--p, 0%)); }
+#scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid var(--ship); }
+#scrub::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid var(--ship); }
+#ticks { position: absolute; inset: 0 7px; pointer-events: none; }
+.tick { position: absolute; top: 0; bottom: 0; pointer-events: auto; }
+.tick i { position: absolute; left: -1px; top: 1px; bottom: 1px; width: 2px; background: var(--sky); border-radius: 1px; }
+.tick b { position: absolute; bottom: 24px; left: 0; transform: translateX(-50%); white-space: nowrap; font: 11px/1.3 var(--font-ui);
+  color: var(--text); background: var(--panel); border: 1px solid var(--edge); border-radius: 6px; padding: 3px 7px; text-align: center; }
+.tick.right b { transform: translateX(-90%); }
+.tick b { display: none; }
+.tick { width: 12px; margin-left: -6px; }
+.tick i { left: 5px; }
+.tick:hover b { display: block; left: 6px; }
+.phase { margin-top: 8px; color: var(--ship); font-weight: 650; }
+#next { margin-top: 8px; }
+.foot { color: var(--muted); font-size: 12px; margin: 0; max-width: 110ch; }
+.foot a { color: var(--sky); }
+
+.tag { position: fixed; left: 0; top: 0; pointer-events: none; font-size: 12px; white-space: nowrap; transition: opacity 0.2s;
+  text-shadow: 0 0 4px #000, 0 0 8px #000; will-change: transform; }
+.tag span { position: absolute; left: 12px; top: -22px; }
+#shipLabel { color: var(--ship); font-weight: 650; }
+#baseLabel { color: #8fe3ff; }
+#sunLabel { color: #fff3c4; }
+#nogl { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; background: var(--space); }
+#nogl[hidden] { display: none; }
+
+@media (max-width: 760px) {
+  .hud { grid-template: "head" auto "." 1fr "tele" auto "bar" auto / 1fr; padding: 12px; gap: 8px; }
+  h1 { font-size: 18px; }
+  header p, #summary { display: none; }
+  .tele { width: auto; padding: 10px 12px; }
+  .clock { font-size: 22px; }
+  .tele dl { grid-template-columns: auto 1fr auto 1fr; margin-top: 8px; }
+  .state { margin-top: 8px; padding-top: 8px; }
+  .checks { margin-left: 0; }
+  .foot { display: none; }
+  button { padding: 7px 9px; }
+  .tick b { display: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="3D view of Earth with Starship's orbit and ground track"></canvas>
+<div id="shipLabel" class="tag"><span>Ship 42</span></div>
+<div id="baseLabel" class="tag"><span>Starbase</span></div>
+<div id="sunLabel" class="tag"><span>Sun overhead</span></div>
+
+<div class="hud">
+  <header>
+    <h1>Starship Flight 15 in orbit</h1>
+    <p id="windowLabel">From now to the planned tower catch</p>
+    <dl id="summary"></dl>
+    <p id="note" hidden></p>
+  </header>
+
+  <section class="tele panel" aria-label="Ship position at the displayed time">
+    <div class="clock"><span id="utc">00:00:00</span><small>UTC</small></div>
+    <div class="sub"><span id="local"></span></div>
+    <div class="sub"><span id="met">T+00:00:00</span> · <span id="toLand"></span></div>
+    <div class="phase" id="phase">Coasting in orbit</div>
+    <dl>
+      <dt>Lat</dt><dd id="lat">0</dd>
+      <dt>Lon</dt><dd id="lon">0</dd>
+      <dt>Height</dt><dd id="alt">0</dd>
+      <dt>Ground speed</dt><dd id="spd">0</dd>
+      <dt>Orbit</dt><dd id="rev">0</dd>
+    </dl>
+    <div class="state"><span id="lightDot"></span><span id="light">In sunlight</span><span id="over"></span></div>
+    <div class="sub" id="next"></div>
+  </section>
+
+  <section class="bar panel" aria-label="Playback">
+    <div class="timeline">
+      <span id="tStart">00:00 UTC</span>
+      <div class="track">
+        <input type="range" id="scrub" min="0" max="28800" step="1" value="0" aria-label="Time within the window">
+        <div id="ticks"></div>
+      </div>
+      <span id="tEnd">08:00 UTC</span>
+    </div>
+    <div class="row">
+      <button id="play" type="button" aria-pressed="true">Pause</button>
+      <span class="lbl">Speed</span>
+      <div class="group" role="group" aria-label="Playback speed">
+        <button type="button" data-speed="1" aria-pressed="false">Real time</button>
+        <button type="button" data-speed="60" aria-pressed="false">60×</button>
+        <button type="button" data-speed="600" aria-pressed="true">600×</button>
+        <button type="button" data-speed="3000" aria-pressed="false">3000×</button>
+      </div>
+      <span class="lbl">Camera</span>
+      <div class="group" role="group" aria-label="Camera">
+        <button type="button" data-view="follow" aria-pressed="true">Follow ship</button>
+        <button type="button" data-view="fixed" aria-pressed="false">Earth fixed</button>
+        <button type="button" data-view="inertial" aria-pressed="false">Space fixed</button>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="showTrack" checked><span class="sw" style="background:var(--ship)"></span>Ground track</label>
+        <label><input type="checkbox" id="showSun" checked><span class="sw" style="background:repeating-linear-gradient(90deg,#fff 0 4px,transparent 4px 7px)"></span>Sun line</label>
+        <label><input type="checkbox" id="showOrbit" checked><span class="sw" style="background:var(--sky)"></span>Orbit in space</label>
+      </div>
+    </div>
+    <p class="foot">Orbit fitted to 161 live telemetry points from stardash.live (276 m RMS) and propagated with J2 gravity, no drag, up to the planned deorbit burn at 20:23:33 UTC.
+      Burn, reentry at 20:58:22 and catch at 21:20:10 UTC (T+22:32:34) follow the published SpaceX timeline. The glide from the reentry point near Hawaii to Starbase is a sketch, not a simulation.</p>
+  </section>
+</div>
+
+<div id="nogl" hidden><p>This view needs WebGL, which this browser has turned off. Open the page in a browser with hardware acceleration enabled.</p></div>
+<script src="app.js"></script>
+</body>
+</html>
