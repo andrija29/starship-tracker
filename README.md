@@ -16,3 +16,8 @@ to the planned tower catch at 21:20:10 UTC (T+22:32:34).
 `dist/` must be served over HTTP; opening `index.html` from disk blocks the textures.
 
 Orbit data: fitted to the stardash.live public feed. Earth textures: NASA Blue Marble / Black Marble (via the three-globe package).
+
+## Deploy to GitHub Pages
+
+In the repository: Settings → Pages → Source: **GitHub Actions**. Every push to `main`
+then builds and publishes `dist/` via `.github/workflows/pages.yml`.
